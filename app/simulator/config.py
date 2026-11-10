@@ -23,10 +23,10 @@ class StandinConfig(BaseModel):
     inter_token_jitter_ms: float = Field(default=0.5, ge=0.0, description="Jitter between streamed tokens in ms (Assumption)")
 
     # --- Empirical Rate Limits (From Groq x-ratelimit-* headers) ---
-    rpm_limit: int = Field(default=30, ge=1, description="Requests per minute limit (Measured from Groq RPM)")
-    tpm_limit: int = Field(default=8000, ge=1, description="Tokens per minute limit (Measured from x-ratelimit-limit-tokens)")
-    rpd_limit: int = Field(default=1000, ge=1, description="Requests per day limit (Measured from x-ratelimit-limit-requests)")
-    daily_token_limit: int = Field(default=500000, ge=1, description="Daily tokens ceiling (Documented Free Tier)")
+    rpm_limit: int = Field(default=30, ge=0, description="Requests per minute limit (Measured from Groq RPM)")
+    tpm_limit: int = Field(default=8000, ge=0, description="Tokens per minute limit (Measured from x-ratelimit-limit-tokens)")
+    rpd_limit: int = Field(default=1000, ge=0, description="Requests per day limit (Measured from x-ratelimit-limit-requests)")
+    daily_token_limit: int = Field(default=500000, ge=0, description="Daily tokens ceiling (Documented Free Tier)")
 
     # --- Concurrency & Degradation Assumptions ---
     # Groq LPUs handle concurrent batches efficiently until capacity saturation

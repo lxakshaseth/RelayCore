@@ -1,0 +1,4 @@
+"Setting (piece size, pieces fetched, re-rank yes or no)",Questions asked,Correct and cited %,Wrong %,Correctly refused %,Tokens per answer,First token p50 / p95 (ms),Total time p50 / p95 (ms)
+medium_k3,120,39.2,0.0,22.5,267.1,217.5 / 719.1,3805.5 / 10218.1
+small_k6,10,90.0,0.0,0.0,809.7,201.0 / 257.0,418.0 / 11610.8
+large_k2,10,70.0,0.0,0.0,0.0,not measured / not measured,11176.0 / 14104.2

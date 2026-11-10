@@ -43,7 +43,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Results & Logs
-results/*.csv
-results/tables/*.csv
+# Results & Logs (Allow tracked assignment deliverables)
 logs/*.log
+

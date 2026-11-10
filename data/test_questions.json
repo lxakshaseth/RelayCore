@@ -1,0 +1,128 @@
+[
+  {
+    "id": "q1",
+    "question": "What is the dimension of the embedding layers and sub-layers dmodel in the Transformer?",
+    "target_paper": "1706.03762v7",
+    "expected_answer_keywords": ["512", "dmodel"],
+    "is_answerable": true
+  },
+  {
+    "id": "q2",
+    "question": "How many identical layers compose the encoder stack in Attention Is All You Need?",
+    "target_paper": "1706.03762v7",
+    "expected_answer_keywords": ["6", "identical layers"],
+    "is_answerable": true
+  },
+  {
+    "id": "q3",
+    "question": "What optimizer and learning rate warmup formula were used for training the Transformer?",
+    "target_paper": "1706.03762v7",
+    "expected_answer_keywords": ["Adam", "warmup_steps", "4000"],
+    "is_answerable": true
+  },
+  {
+    "id": "q4",
+    "question": "What are the two sub-layers in each encoder layer of the Transformer?",
+    "target_paper": "1706.03762v7",
+    "expected_answer_keywords": ["multi-head", "self-attention", "feed-forward"],
+    "is_answerable": true
+  },
+  {
+    "id": "q5",
+    "question": "Why does the Transformer use Scaled Dot-Product Attention instead of additive attention?",
+    "target_paper": "1706.03762v7",
+    "expected_answer_keywords": ["faster", "space-efficient", "matrix multiplication"],
+    "is_answerable": true
+  },
+  {
+    "id": "q6",
+    "question": "What is the Mimi neural audio codec and at what frame rate does it operate in Moshi?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": ["12.5 Hz", "Mimi", "codec"],
+    "is_answerable": true
+  },
+  {
+    "id": "q7",
+    "question": "How does Moshi model multi-stream audio and text dialogue simultaneously?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": ["Temporal Transformer", "Depth Transformer", "multi-stream"],
+    "is_answerable": true
+  },
+  {
+    "id": "q8",
+    "question": "What is the latency achieved by Moshi in real-time spoken dialogue?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": ["200ms", "latency", "real-time"],
+    "is_answerable": true
+  },
+  {
+    "id": "q9",
+    "question": "What sampling rate and audio bandwidth does Mimi process in Moshi?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": ["24 kHz", "audio"],
+    "is_answerable": true
+  },
+  {
+    "id": "q10",
+    "question": "What quantization method does Mimi use for discrete audio tokenization?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": ["RVQ", "Residual Vector Quantization"],
+    "is_answerable": true
+  },
+  {
+    "id": "q11",
+    "question": "What is the H-Net architecture in Dynamic Chunking for hierarchical sequence modeling?",
+    "target_paper": "2507.07955v2",
+    "expected_answer_keywords": ["U-Net", "subsampling", "hierarchical"],
+    "is_answerable": true
+  },
+  {
+    "id": "q12",
+    "question": "How does dynamic chunking differ from fixed-size pooling like in MegaByte?",
+    "target_paper": "2507.07955v2",
+    "expected_answer_keywords": ["data-dependent", "dynamic", "fixed"],
+    "is_answerable": true
+  },
+  {
+    "id": "q13",
+    "question": "What boundary prediction heuristics does dynamic chunking aim to replace?",
+    "target_paper": "2507.07955v2",
+    "expected_answer_keywords": ["entropy", "delimiter", "heuristics"],
+    "is_answerable": true
+  },
+  {
+    "id": "q14",
+    "question": "What downstream tasks were used to evaluate H-Net in Dynamic Chunking?",
+    "target_paper": "2507.07955v2",
+    "expected_answer_keywords": ["byte-level", "language modeling"],
+    "is_answerable": true
+  },
+  {
+    "id": "q15",
+    "question": "Does H-Net require external auxiliary boundary predictors for sequence chunking?",
+    "target_paper": "2507.07955v2",
+    "expected_answer_keywords": ["end-to-end", "no", "eliminate"],
+    "is_answerable": true
+  },
+  {
+    "id": "q16",
+    "question": "What is the oven baking temperature and recipe for double chocolate chip cookies?",
+    "target_paper": "none",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "q17",
+    "question": "What was the total electricity cost of training Moshi on AWS cluster in dollars?",
+    "target_paper": "2410.00037v1",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "q18",
+    "question": "How do you replace the brake pads on a 2018 Toyota Corolla?",
+    "target_paper": "none",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  }
+]

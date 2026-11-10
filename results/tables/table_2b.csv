@@ -1,0 +1,9 @@
+Scenario,Succeeded %,Rate-limited %,Timed out or given up %,Retries per request,Peak queue length,Tokens per answer,"Cost per 1,000 answers"
+steady_real,100.0,0.0,0.0,0.0,1,906.0,$0.0453
+steady,53.3,46.7,0.0,0.47,3,514.8,$0.0257
+burst,44.0,56.0,0.0,0.12,3,327.4,$0.0164
+sustained_overload,35.0,65.0,0.0,0.1,2,203.7,$0.0102
+limit_halved,35.0,65.0,0.0,0.25,3,173.4,$0.0087
+daily_budget_exhausted,0.0,100.0,0.0,0.0,1,0.0,$0.0000
+retrieval_sweep_small,80.0,20.0,0.0,0.1,2,809.7,$0.0405
+retrieval_sweep_large,0.0,100.0,0.0,1.2,3,0.0,$0.0000
