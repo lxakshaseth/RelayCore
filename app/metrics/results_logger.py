@@ -47,9 +47,15 @@ class ResultsCsvLogger:
 
     def __init__(self, output_file: str = "results/results.csv"):
         self.output_file = output_file
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
         self._records: List[RequestMetricRecord] = []
         self._initialized = False
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def _ensure_file_header(self) -> None:
         """Create file and write header row if it doesn't exist."""
@@ -65,7 +71,7 @@ class ResultsCsvLogger:
         if not self._initialized:
             self._ensure_file_header()
 
-        async with self._lock:
+        async with self.lock:
             self._records.append(record)
             with open(self.output_file, mode="a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)

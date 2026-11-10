@@ -17,6 +17,7 @@ from app.models.base import AbstractModelClient
 from app.models.groq_client import GroqAsyncClient
 from app.models.schemas import Message, ModelRequest, ModelResponse
 from app.retrieval.models import DocumentChunk, RetrievalResponse, RetrievalResult
+from app.retrieval.parser import CANONICAL_PAPERS
 from app.retrieval.service import RetrievalService, get_retrieval_service
 from app.schemas.query import CitationItem, ExecutionMetrics, QueryRequest, QueryResponse
 from app.simulator.service import StandinModelService
@@ -118,24 +119,104 @@ class OrchestrationPipeline:
             "papers do not provide",
             "cannot be answered from the provided",
             "not mentioned in the",
+            "insufficient evidence to answer",
         ]
         is_refusal = any(p in answer_lower for p in refusal_phrases)
 
-        if not has_evidence or is_refusal:
-            if is_refusal or not has_evidence:
+        if not has_evidence:
+            if is_refusal:
                 return "refused_correctly", [], True
             else:
-                return "refused_wrongly", [], False
+                return "wrong", [], False
 
-        # Extract structured citations from model output
+        if is_refusal:
+            # Model refused despite passages having evidence
+            return "refused_wrongly", [], False
+
+        # Canonical papers validation map
+        canonical_arxiv_bases = {entry.arxiv_id for entry in CANONICAL_PAPERS.values()}
+
+        # 1. Detect hallucinated or nonexistent arXiv IDs in text or bracketed citations
+        # e.g., '9999.99999' or 'arxiv:9999.99999'
+        arxiv_matches = re.findall(r"\b(\d{4}\.\d{4,5}(?:v\d+)?)\b", answer)
+        for matched_id in arxiv_matches:
+            base_id = matched_id.split("v")[0]
+            if base_id not in canonical_arxiv_bases:
+                logger.warning("Citation references nonexistent paper arXiv ID: %s", matched_id)
+                return "wrong", [], False
+
+        # 2. Detect out-of-bounds page numbers (all 3 papers have <= 60 pages)
+        page_matches = re.findall(r"(?:page|p\.)\s*(\d+)", answer, re.IGNORECASE)
+        for p_str in page_matches:
+            p_num = int(p_str)
+            if p_num <= 0 or p_num > 60:
+                logger.warning("Citation contains out-of-bounds page number: %d", p_num)
+                return "wrong", [], False
+
+        # 3. Check bracketed citations for section/page/paper consistency against retrieved chunks
+        retrieved_paper_bases = {p.chunk.paper_id.split("v")[0] for p in passages}
+        retrieved_pages = {p.chunk.page_number for p in passages}
+        bracket_citations = re.findall(r"\[([^\]]+)\]", answer)
+        for b_cit in bracket_citations:
+            # Check arXiv IDs inside brackets
+            b_arxiv = re.findall(r"\b(\d{4}\.\d{4,5}(?:v\d+)?)\b", b_cit)
+            for m_id in b_arxiv:
+                b_base = m_id.split("v")[0]
+                if b_base not in canonical_arxiv_bases:
+                    logger.warning("Bracket citation references nonexistent paper: %s", m_id)
+                    return "wrong", [], False
+                if b_base not in retrieved_paper_bases:
+                    logger.warning("Bracket citation references paper not in retrieved passages: %s", m_id)
+                    return "wrong", [], False
+
+            # Check pages inside brackets
+            b_pages = re.findall(r"(?:page|p\.)\s*(\d+)", b_cit, re.IGNORECASE)
+            for p_str in b_pages:
+                p_num = int(p_str)
+                if p_num <= 0 or p_num > 60:
+                    logger.warning("Bracket citation page out of bounds: %d", p_num)
+                    return "wrong", [], False
+                if p_num not in retrieved_pages:
+                    logger.warning("Bracket citation page %d not in retrieved chunks (%s)", p_num, retrieved_pages)
+                    return "wrong", [], False
+
+        # 4. Check claim grounding lexical overlap against retrieved passages
+        combined_passages_text = " ".join(p.chunk.content for p in passages)
+        stopwords = {
+            "the", "is", "at", "which", "on", "and", "a", "an", "in", "to", "of",
+            "for", "with", "as", "by", "that", "this", "it", "from", "are", "be",
+            "was", "were", "or", "an", "will", "can", "has", "have", "had", "not",
+            "but", "what", "how", "why", "when", "where", "who", "whom", "its"
+        }
+        answer_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", answer_lower)) - stopwords
+        passages_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", combined_passages_text.lower())) - stopwords
+
+        if answer_words:
+            overlap = len(answer_words.intersection(passages_words)) / len(answer_words)
+            if overlap < 0.15:
+                logger.warning(
+                    "Answer grounding lexical overlap too low: %.1f%% (minimum 15%% required)",
+                    overlap * 100,
+                )
+                return "wrong", [], False
+
+        # 5. Extract structured citations from model output and match against retrieved chunks
         extracted_citations: List[CitationItem] = []
         matched_chunks = set()
 
         for p in passages:
             chunk = p.chunk
             # Check if paper title, arXiv ID, or section is mentioned in the text
-            paper_ref = chunk.paper_id in answer or chunk.paper_title[:20].lower() in answer_lower
-            section_ref = chunk.section.lower() in answer_lower or f"page {chunk.page_number}" in answer_lower
+            paper_ref = (
+                chunk.paper_id in answer
+                or chunk.paper_id.split("v")[0] in answer
+                or chunk.paper_title[:20].lower() in answer_lower
+            )
+            section_ref = (
+                chunk.section.lower() in answer_lower
+                or f"page {chunk.page_number}" in answer_lower
+                or f"p. {chunk.page_number}" in answer_lower
+            )
 
             if paper_ref or section_ref:
                 matched_chunks.add(chunk.chunk_id)
@@ -188,8 +269,18 @@ class OrchestrationPipeline:
                 final_answer = "Invalid query: question must be at least 3 characters long."
                 total_ms = max(1, int((time.perf_counter() - t0) * 1000))
                 await self._log_metrics(
-                    request_id, scenario, start_time_iso, None, total_ms, status,
-                    retries, 0, 0, setting_name, answer_grade
+                    request_id=request_id,
+                    scenario=scenario,
+                    start_time=start_time_iso,
+                    first_token_ms=None,
+                    total_ms=total_ms,
+                    status=status,
+                    retries=0,
+                    tokens_in=0,
+                    tokens_out=0,
+                    retrieval_setting=setting_name,
+                    answer_grade=answer_grade,
+                    source="not_called",
                 )
                 return self._build_response(
                     request_id=request_id,
@@ -201,15 +292,15 @@ class OrchestrationPipeline:
                     status=status,
                     tokens_in=0,
                     tokens_out=0,
-                    retries=retries,
+                    retries=0,
                     setting_name=setting_name,
                     answer_grade=answer_grade,
+                    source="not_called",
                 )
 
             # -----------------------------------------------------------------
             # STAGE 2: Request Queueing & Admission Control
             # -----------------------------------------------------------------
-            # Check deadline before starting pipeline work
             if time.time() > deadline_time:
                 raise TimeoutError("Client timeout expired before admission to pipeline.")
 
@@ -225,8 +316,18 @@ class OrchestrationPipeline:
                 )
                 total_ms = max(1, int((time.perf_counter() - t0) * 1000))
                 await self._log_metrics(
-                    request_id, scenario, start_time_iso, None, total_ms, status,
-                    retries, 0, 0, setting_name, answer_grade
+                    request_id=request_id,
+                    scenario=scenario,
+                    start_time=start_time_iso,
+                    first_token_ms=None,
+                    total_ms=total_ms,
+                    status=status,
+                    retries=0,
+                    tokens_in=0,
+                    tokens_out=0,
+                    retrieval_setting=setting_name,
+                    answer_grade=answer_grade,
+                    source="not_called",
                 )
                 return self._build_response(
                     request_id=request_id,
@@ -238,9 +339,10 @@ class OrchestrationPipeline:
                     status=status,
                     tokens_in=0,
                     tokens_out=0,
-                    retries=retries,
+                    retries=0,
                     setting_name=setting_name,
                     answer_grade=answer_grade,
+                    source="not_called",
                 )
 
             # -----------------------------------------------------------------
@@ -264,14 +366,25 @@ class OrchestrationPipeline:
             if not retrieval_res.has_evidence:
                 status = "ok"
                 answer_grade = "refused_correctly"
+                target_desc = f" (targeted papers: {target_papers})" if target_papers else " (across all indexed papers)"
                 final_answer = (
-                    f"The provided research papers do not contain sufficient evidence to answer: '{clean_question}'. "
+                    f"The provided research papers{target_desc} do not contain sufficient evidence to answer: '{clean_question}'. "
                     f"Reason: {retrieval_res.refusal_reason}"
                 )
                 total_ms = max(1, int((time.perf_counter() - t0) * 1000))
                 await self._log_metrics(
-                    request_id, scenario, start_time_iso, None, total_ms, status,
-                    retries, 0, 0, setting_name, answer_grade
+                    request_id=request_id,
+                    scenario=scenario,
+                    start_time=start_time_iso,
+                    first_token_ms=None,
+                    total_ms=total_ms,
+                    status=status,
+                    retries=retries,
+                    tokens_in=0,
+                    tokens_out=0,
+                    retrieval_setting=setting_name,
+                    answer_grade=answer_grade,
+                    source="not_called",
                 )
                 return self._build_response(
                     request_id=request_id,
@@ -286,6 +399,7 @@ class OrchestrationPipeline:
                     retries=retries,
                     setting_name=setting_name,
                     answer_grade=answer_grade,
+                    source="not_called",
                 )
 
             # -----------------------------------------------------------------
@@ -312,8 +426,18 @@ class OrchestrationPipeline:
                 final_answer = f"Request delayed and shed due to provider rate limits: {limit_reason}"
                 total_ms = max(1, int((time.perf_counter() - t0) * 1000))
                 await self._log_metrics(
-                    request_id, scenario, start_time_iso, None, total_ms, status,
-                    retries, 0, 0, setting_name, answer_grade
+                    request_id=request_id,
+                    scenario=scenario,
+                    start_time=start_time_iso,
+                    first_token_ms=None,
+                    total_ms=total_ms,
+                    status=status,
+                    retries=retries,
+                    tokens_in=0,
+                    tokens_out=0,
+                    retrieval_setting=setting_name,
+                    answer_grade=answer_grade,
+                    source="not_called",
                 )
                 return self._build_response(
                     request_id=request_id,
@@ -328,6 +452,7 @@ class OrchestrationPipeline:
                     retries=retries,
                     setting_name=setting_name,
                     answer_grade=answer_grade,
+                    source="not_called",
                 )
 
             # -----------------------------------------------------------------
@@ -340,6 +465,7 @@ class OrchestrationPipeline:
                 remaining_deadline = deadline_time - time.time()
                 if remaining_deadline <= 0:
                     status = "timeout"
+                    answer_grade = "refused_wrongly"
                     final_answer = "Request timed out: client deadline expired before model invocation."
                     break
 
@@ -351,18 +477,31 @@ class OrchestrationPipeline:
                     ),
                 ]
 
-                # Invoke Model Backend with Concurrency Semaphore
+                # Invoke Model Backend with Concurrency Semaphore and strict deadline timeout
+                call_timeout = min(15.0, max(0.01, remaining_deadline))
                 model_req = ModelRequest(
                     messages=prompt_messages,
-                    timeout_seconds=min(15.0, max(0.01, remaining_deadline)),
+                    timeout_seconds=call_timeout,
                     temperature=0.1,
                     max_tokens=256,
                 )
                 if hasattr(self.rate_limiter, "concurrency_semaphore"):
                     async with self.rate_limiter.concurrency_semaphore:
-                        model_response = await self.model_client.complete(model_req)
+                        model_response = await asyncio.wait_for(
+                            self.model_client.complete(model_req),
+                            timeout=call_timeout,
+                        )
                 else:
-                    model_response = await self.model_client.complete(model_req)
+                    model_response = await asyncio.wait_for(
+                        self.model_client.complete(model_req),
+                        timeout=call_timeout,
+                    )
+
+                if time.time() > deadline_time:
+                    status = "timeout"
+                    answer_grade = "refused_wrongly"
+                    final_answer = "Request timed out: client deadline was exceeded during inference."
+                    break
 
                 if attempt == 0:
                     first_token_ms = model_response.first_token_ms
@@ -388,38 +527,57 @@ class OrchestrationPipeline:
                         status = "ok"
                         break
                     else:
-                        # Hallucination or missing citation detected
-                        logger.warning("Attempt %d: Output lacked valid citations. Retrying with strict grounding hint...", attempt + 1)
-
-                # STAGE 10: Retry Backoff Decision
-                daily_exhausted = (
-                    self.rate_limiter.is_daily_budget_exhausted()
-                    if hasattr(self.rate_limiter, "is_daily_budget_exhausted")
-                    else False
-                )
-                if self.retry_policy.is_retriable(
-                    response=model_response,
-                    attempt=attempt,
-                    deadline_time=deadline_time,
-                    is_daily_exhausted=daily_exhausted,
-                ):
-                    retries += 1
-                    # Avoid worsening overload on TPM: shed context
-                    if self.retry_policy.should_shed_context_on_retry(model_response):
-                        logger.warning("Upstream rate limited on TPM. Shedding context passages for retry...")
-                        passages_context = self.format_passages_context(retrieval_res.passages, max_passages=2)
-
-                    retry_after = (
-                        model_response.rate_limit_info.retry_after
-                        if model_response and model_response.rate_limit_info
-                        else None
-                    )
-                    backoff = self.retry_policy.compute_backoff(attempt=attempt, retry_after=retry_after)
-                    await asyncio.sleep(backoff)
+                        logger.warning(
+                            "Attempt %d: Output lacked valid citations or contained hallucinations (grade=%s).",
+                            attempt + 1,
+                            grade,
+                        )
+                        answer_grade = grade
+                        final_citations = []
+                        final_answer = (
+                            "Answer rejected: generated response contained ungrounded claims "
+                            "or invalid citations that could not be verified against the source text."
+                        )
+                        # Check if retry attempt is permitted and fits client deadline
+                        if attempt < self.settings.max_retries and (deadline_time - time.time()) > 1.0:
+                            retries += 1
+                            backoff = self.retry_policy.compute_backoff(attempt=attempt)
+                            await asyncio.sleep(backoff)
+                            continue
+                        else:
+                            # Retries exhausted: ensure ungrounded claim is NEVER returned
+                            status = "ok"
+                            break
                 else:
-                    status = model_response.status if model_response else "error"
-                    final_answer = model_response.content if model_response else "Failed after maximum retries."
-                    break
+                    # Upstream model returned non-OK status (e.g. rate_limited, error)
+                    daily_exhausted = (
+                        self.rate_limiter.is_daily_budget_exhausted()
+                        if hasattr(self.rate_limiter, "is_daily_budget_exhausted")
+                        else False
+                    )
+                    if self.retry_policy.is_retriable(
+                        response=model_response,
+                        attempt=attempt,
+                        deadline_time=deadline_time,
+                        is_daily_exhausted=daily_exhausted,
+                    ):
+                        retries += 1
+                        if self.retry_policy.should_shed_context_on_retry(model_response):
+                            logger.warning("Upstream rate limited on TPM. Shedding context passages for retry...")
+                            passages_context = self.format_passages_context(retrieval_res.passages, max_passages=2)
+
+                        retry_after = (
+                            model_response.rate_limit_info.retry_after
+                            if model_response and model_response.rate_limit_info
+                            else None
+                        )
+                        backoff = self.retry_policy.compute_backoff(attempt=attempt, retry_after=retry_after)
+                        await asyncio.sleep(backoff)
+                    else:
+                        status = model_response.status if model_response else "error"
+                        final_answer = model_response.content if model_response else "Failed after maximum retries."
+                        answer_grade = "refused_wrongly" if status == "rate_limited" else "wrong"
+                        break
 
             if status == "timeout" and not final_answer:
                 final_answer = "Request timed out: client deadline was exceeded."
@@ -427,10 +585,10 @@ class OrchestrationPipeline:
             if status == "ok" and not final_answer:
                 final_answer = model_response.content if model_response else "Unable to synthesize answer."
 
-        except TimeoutError as e:
+        except (TimeoutError, asyncio.TimeoutError) as e:
             status = "timeout"
             answer_grade = "refused_wrongly"
-            final_answer = f"Request timed out: {str(e)}"
+            final_answer = f"Request timed out: {str(e) if str(e) else 'client deadline exceeded.'}"
         except Exception as e:
             status = "error"
             answer_grade = "wrong"
@@ -441,8 +599,11 @@ class OrchestrationPipeline:
         # STAGE 11: Final Response Generation
         # ---------------------------------------------------------------------
         total_ms = max(1, int((time.perf_counter() - t0) * 1000))
-        source_name = getattr(self.model_client, "__class__", None).__name__
-        source_tag = "stand-in" if "Standin" in source_name else "real"
+        if total_tokens_in > 0 or total_tokens_out > 0 or first_token_ms is not None:
+            source_name = getattr(self.model_client, "__class__", None).__name__
+            source_tag = "stand-in" if "Standin" in source_name else "real"
+        else:
+            source_tag = "not_called"
 
         # ---------------------------------------------------------------------
         # STAGE 12: Metrics Logging
@@ -459,6 +620,7 @@ class OrchestrationPipeline:
             tokens_out=total_tokens_out,
             retrieval_setting=setting_name,
             answer_grade=answer_grade,
+            source=source_tag,
         )
 
         return self._build_response(
@@ -490,14 +652,19 @@ class OrchestrationPipeline:
         tokens_out: int,
         retrieval_setting: str,
         answer_grade: str,
+        source: Optional[str] = None,
     ) -> None:
         """Write record to results.csv."""
-        source_name = getattr(self.model_client, "__class__", None).__name__
-        source_tag = "stand-in" if "Standin" in source_name else "real"
+        if source is None:
+            if tokens_in == 0 and tokens_out == 0 and first_token_ms is None:
+                source = "not_called"
+            else:
+                source_name = getattr(self.model_client, "__class__", None).__name__
+                source = "stand-in" if "Standin" in source_name else "real"
         record = RequestMetricRecord(
             request_id=request_id,
             scenario=scenario,
-            source=source_tag,
+            source=source,
             start_time=start_time,
             first_token_ms=first_token_ms,
             total_ms=total_ms,
@@ -524,7 +691,7 @@ class OrchestrationPipeline:
         retries: int,
         setting_name: str,
         answer_grade: str,
-        source: str = "real",
+        source: str = "not_called",
     ) -> QueryResponse:
         """Assemble standardized QueryResponse."""
         return QueryResponse(

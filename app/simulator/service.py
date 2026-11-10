@@ -29,7 +29,7 @@ class StandinModelService(AbstractModelClient):
     def __init__(self, config: Optional[StandinConfig] = None):
         self.config = config or StandinConfig()
         self.audit = SimulatorAuditRecorder()
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
 
         # Deterministic random generator
         self.rng = random.Random(self.config.seed) if self.config.seed is not None else random.Random()
@@ -45,6 +45,12 @@ class StandinModelService(AbstractModelClient):
         self._daily_requests_count: int = 0
         self._daily_tokens_count: int = 0
         self._daily_start_time: float = time.time()
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def set_config(self, config: StandinConfig) -> None:
         """Update simulator configuration dynamically during experiments."""
@@ -208,7 +214,7 @@ class StandinModelService(AbstractModelClient):
         prompt_tokens = max(1, prompt_len // 4)
         now = time.time()
 
-        async with self._lock:
+        async with self.lock:
             # 1. Rate Limit Checks
             rate_limit_err = await self._check_rate_limits(prompt_tokens, now)
             if rate_limit_err:
@@ -295,7 +301,7 @@ class StandinModelService(AbstractModelClient):
             # Simulate execution time
             await asyncio.sleep(total_ms / 1000.0)
 
-            async with self._lock:
+            async with self.lock:
                 self._sliding_tokens.append((time.time(), prompt_tokens + completion_tokens))
                 self._daily_tokens_count += prompt_tokens + completion_tokens
 
@@ -331,7 +337,7 @@ class StandinModelService(AbstractModelClient):
             return res
 
         finally:
-            async with self._lock:
+            async with self.lock:
                 self.active_concurrency = max(0, self.active_concurrency - 1)
 
     async def stream_complete(
@@ -343,7 +349,7 @@ class StandinModelService(AbstractModelClient):
         prompt_tokens = max(1, prompt_len // 4)
         now = time.time()
 
-        async with self._lock:
+        async with self.lock:
             rate_limit_err = await self._check_rate_limits(prompt_tokens, now)
             if rate_limit_err:
                 self.audit.record(
@@ -380,7 +386,7 @@ class StandinModelService(AbstractModelClient):
                 if inter_token_delay > 0:
                     await asyncio.sleep(inter_token_delay)
 
-            async with self._lock:
+            async with self.lock:
                 self._sliding_tokens.append((time.time(), prompt_tokens + completion_tokens))
                 self._daily_tokens_count += prompt_tokens + completion_tokens
 
@@ -408,5 +414,5 @@ class StandinModelService(AbstractModelClient):
             yield ("", final_res)
 
         finally:
-            async with self._lock:
+            async with self.lock:
                 self.active_concurrency = max(0, self.active_concurrency - 1)

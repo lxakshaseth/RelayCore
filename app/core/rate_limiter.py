@@ -69,7 +69,7 @@ class RelayRateLimiter:
         )
 
         # Concurrency Limiter Semaphore
-        self.concurrency_semaphore = asyncio.Semaphore(self.max_concurrency)
+        self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
         self.active_in_flight: int = 0
 
         # Daily Quota Counters
@@ -77,7 +77,19 @@ class RelayRateLimiter:
         self.daily_tokens_count: int = 0
         self._daily_start_time: float = time.time()
 
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    @property
+    def concurrency_semaphore(self) -> asyncio.Semaphore:
+        if self._concurrency_semaphore is None:
+            self._concurrency_semaphore = asyncio.Semaphore(self.max_concurrency)
+        return self._concurrency_semaphore
 
     def _check_daily_reset(self) -> None:
         """Reset 24-hour counters if 86,400 seconds elapsed."""
@@ -106,10 +118,10 @@ class RelayRateLimiter:
 
         while True:
             elapsed = time.monotonic() - start_time
-            if elapsed > max_wait_seconds:
+            if elapsed >= max_wait_seconds:
                 return False, f"Rate limiter wait timed out after {max_wait_seconds:.1f}s"
 
-            async with self._lock:
+            async with self.lock:
                 self._check_daily_reset()
 
                 # 1. Daily Budget Check - Never wait or retry if daily budget is gone
@@ -134,14 +146,18 @@ class RelayRateLimiter:
                 wait_tok = self.token_bucket.time_until_available(float(estimated_tokens))
                 needed_wait = max(wait_req, wait_tok)
 
-            wait_step = min(max(0.05, needed_wait), 0.5)
+            remaining = max_wait_seconds - (time.monotonic() - start_time)
+            if remaining <= 0:
+                return False, f"Rate limiter wait timed out after {max_wait_seconds:.1f}s"
+
+            wait_step = min(max(0.005, needed_wait), min(0.5, remaining))
             await asyncio.sleep(wait_step)
 
     async def record_actual_tokens(self, estimated_tokens: int, actual_tokens: int) -> None:
         """Reconcile difference between estimated tokens and actual consumed tokens."""
         diff = actual_tokens - estimated_tokens
         if diff > 0:
-            async with self._lock:
+            async with self.lock:
                 self.daily_tokens_count += diff
                 # If consumed more than estimated, drain extra tokens from bucket
                 self.token_bucket.consume(float(diff))

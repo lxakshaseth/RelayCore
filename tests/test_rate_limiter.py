@@ -26,115 +26,127 @@ def test_token_bucket_refill_math():
     assert bucket.consume(1.0) is True
 
 
-@pytest.mark.asyncio
-async def test_relay_rate_limiter_rpm_and_tpm():
+def test_relay_rate_limiter_rpm_and_tpm():
     """Verify RelayRateLimiter acquires slots and halts on bucket exhaustion."""
-    settings = Settings(
-        GROQ_RPM_LIMIT=2,
-        GROQ_TPM_LIMIT=200,
-        GROQ_RPD_LIMIT=10,
-    )
-    limiter = RelayRateLimiter(settings=settings)
+    async def _test():
+        settings = Settings(
+            GROQ_RPM_LIMIT=2,
+            GROQ_TPM_LIMIT=200,
+            GROQ_RPD_LIMIT=10,
+        )
+        limiter = RelayRateLimiter(settings=settings)
 
-    # First 2 requests should be permitted immediately
-    ok1, reason1 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.1)
-    assert ok1 is True
-    assert reason1 is None
+        # First 2 requests should be permitted immediately
+        ok1, reason1 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.1)
+        assert ok1 is True
+        assert reason1 is None
 
-    ok2, reason2 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.1)
-    assert ok2 is True
+        ok2, reason2 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.1)
+        assert ok2 is True
 
-    # 3rd request exceeds RPM capacity and should timeout waiting
-    ok3, reason3 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.05)
-    assert ok3 is False
-    assert "timed out" in (reason3 or "").lower()
+        # 3rd request exceeds RPM capacity and should timeout waiting
+        ok3, reason3 = await limiter.acquire_slot(estimated_tokens=50, max_wait_seconds=0.05)
+        assert ok3 is False
+        assert "timed out" in (reason3 or "").lower()
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_daily_budget_exhaustion_fast_fail():
+def test_daily_budget_exhaustion_fast_fail():
     """Verify daily budget exhaustion stops further calls without waiting or retrying."""
-    settings = Settings(
-        GROQ_RPM_LIMIT=10,
-        GROQ_TPM_LIMIT=1000,
-        GROQ_RPD_LIMIT=2,
-    )
-    limiter = RelayRateLimiter(settings=settings)
+    async def _test():
+        settings = Settings(
+            GROQ_RPM_LIMIT=10,
+            GROQ_TPM_LIMIT=1000,
+            GROQ_RPD_LIMIT=2,
+        )
+        limiter = RelayRateLimiter(settings=settings)
 
-    # Consume 2 requests
-    await limiter.acquire_slot(estimated_tokens=10)
-    await limiter.acquire_slot(estimated_tokens=10)
+        # Consume 2 requests
+        await limiter.acquire_slot(estimated_tokens=10)
+        await limiter.acquire_slot(estimated_tokens=10)
 
-    assert limiter.is_daily_budget_exhausted() is True
+        assert limiter.is_daily_budget_exhausted() is True
 
-    # 3rd request must fail immediately with daily budget reason
-    ok, reason = await limiter.acquire_slot(estimated_tokens=10, max_wait_seconds=1.0)
-    assert ok is False
-    assert "daily request budget exhausted" in (reason or "").lower()
+        # 3rd request must fail immediately with daily budget reason
+        ok, reason = await limiter.acquire_slot(estimated_tokens=10, max_wait_seconds=1.0)
+        assert ok is False
+        assert "daily request budget exhausted" in (reason or "").lower()
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_concurrency_limiter_semaphore():
+def test_concurrency_limiter_semaphore():
     """Verify concurrency limiter throttles in-flight executions."""
-    settings = Settings(WORKER_CONCURRENCY=2)
-    limiter = RelayRateLimiter(settings=settings)
+    async def _test():
+        settings = Settings(WORKER_CONCURRENCY=2)
+        limiter = RelayRateLimiter(settings=settings)
 
-    in_flight = 0
-    max_observed = 0
+        in_flight = 0
+        max_observed = 0
 
-    async def worker():
-        nonlocal in_flight, max_observed
-        async with limiter.concurrency_semaphore:
-            in_flight += 1
-            max_observed = max(max_observed, in_flight)
-            await asyncio.sleep(0.05)
-            in_flight -= 1
+        async def worker():
+            nonlocal in_flight, max_observed
+            async with limiter.concurrency_semaphore:
+                in_flight += 1
+                max_observed = max(max_observed, in_flight)
+                await asyncio.sleep(0.01)
+                in_flight -= 1
 
-    await asyncio.gather(*(worker() for _ in range(6)))
-    assert max_observed <= 2
+        await asyncio.gather(*(worker() for _ in range(6)))
+        assert max_observed <= 2
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_bounded_queue_priority_ordering():
+def test_bounded_queue_priority_ordering():
     """Verify high priority requests are dequeued before normal requests."""
-    manager = BoundedPriorityQueueManager(max_depth=10, max_concurrency=2)
+    async def _test():
+        manager = BoundedPriorityQueueManager(max_depth=10, max_concurrency=2)
 
-    item_low = await manager.enqueue("low_1", "payload_low", deadline_seconds=10.0, priority=1)
-    item_high = await manager.enqueue("high_1", "payload_high", deadline_seconds=10.0, priority=5)
+        item_low = await manager.enqueue("low_1", "payload_low", deadline_seconds=10.0, priority=1)
+        item_high = await manager.enqueue("high_1", "payload_high", deadline_seconds=10.0, priority=5)
 
-    dequeued_1 = await manager.dequeue_next()
-    dequeued_2 = await manager.dequeue_next()
+        dequeued_1 = await manager.dequeue_next()
+        dequeued_2 = await manager.dequeue_next()
 
-    assert dequeued_1.item_id == "high_1"
-    assert dequeued_2.item_id == "low_1"
+        assert dequeued_1.item_id == "high_1"
+        assert dequeued_2.item_id == "low_1"
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_bounded_queue_capacity_rejection():
+def test_bounded_queue_capacity_rejection():
     """Verify bounded queue rejects when capacity ceiling is breached."""
-    manager = BoundedPriorityQueueManager(max_depth=2, max_concurrency=1)
+    async def _test():
+        manager = BoundedPriorityQueueManager(max_depth=2, max_concurrency=1)
 
-    await manager.enqueue("req_1", "p1", deadline_seconds=10.0)
-    await manager.enqueue("req_2", "p2", deadline_seconds=10.0)
+        await manager.enqueue("req_1", "p1", deadline_seconds=10.0)
+        await manager.enqueue("req_2", "p2", deadline_seconds=10.0)
 
-    with pytest.raises(RuntimeError) as exc_info:
-        await manager.enqueue("req_3", "p3", deadline_seconds=10.0)
+        with pytest.raises(RuntimeError) as exc_info:
+            await manager.enqueue("req_3", "p3", deadline_seconds=10.0)
 
-    assert "capacity saturated" in str(exc_info.value)
-    assert manager.total_rejected_capacity == 1
+        assert "capacity saturated" in str(exc_info.value)
+        assert manager.total_rejected_capacity == 1
+
+    asyncio.run(_test())
 
 
-@pytest.mark.asyncio
-async def test_bounded_queue_deadline_drop():
+def test_bounded_queue_deadline_drop():
     """Verify expired requests are discarded during dequeue."""
-    manager = BoundedPriorityQueueManager(max_depth=5, max_concurrency=1)
+    async def _test():
+        manager = BoundedPriorityQueueManager(max_depth=5, max_concurrency=1)
 
-    item = await manager.enqueue("expired_req", "payload", deadline_seconds=0.01)
-    await asyncio.sleep(0.03)
+        item = await manager.enqueue("expired_req", "payload", deadline_seconds=0.01)
+        await asyncio.sleep(0.02)
 
-    dequeued = await manager.dequeue_next()
-    assert dequeued is None
-    assert manager.total_dropped_deadline == 1
-    assert item.future.done()
+        dequeued = await manager.dequeue_next()
+        assert dequeued is None
+        assert manager.total_dropped_deadline == 1
+        assert item.future.done()
+
+    asyncio.run(_test())
 
 
 def test_retry_policy_backoff_and_jitter():

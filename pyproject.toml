@@ -35,6 +35,7 @@ minversion = "8.0"
 addopts = "-ra -q --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["asyncio: mark test as async"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 

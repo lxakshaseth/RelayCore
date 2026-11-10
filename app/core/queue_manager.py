@@ -23,22 +23,34 @@ class BoundedPriorityQueueManager:
     def __init__(self, max_depth: int = 100, max_concurrency: int = 5):
         self.max_depth = max_depth
         self.max_concurrency = max_concurrency
-        self._queue: asyncio.PriorityQueue[QueuedItem] = asyncio.PriorityQueue(maxsize=max_depth)
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._queue: Optional[asyncio.PriorityQueue] = None
+        self._semaphore: Optional[asyncio.Semaphore] = None
         self.peak_queue_length: int = 0
         self.total_enqueued: int = 0
         self.total_dropped_deadline: int = 0
         self.total_rejected_capacity: int = 0
 
     @property
+    def queue(self) -> asyncio.PriorityQueue:
+        if self._queue is None:
+            self._queue = asyncio.PriorityQueue(maxsize=self.max_depth)
+        return self._queue
+
+    @property
+    def semaphore(self) -> asyncio.Semaphore:
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.max_concurrency)
+        return self._semaphore
+
+    @property
     def current_depth(self) -> int:
-        return self._queue.qsize()
+        return self.queue.qsize()
 
     async def enqueue(
         self, item_id: str, payload: Any, deadline_seconds: float, priority: int = 1
     ) -> QueuedItem:
         """Enqueue request. Rejects if capacity ceiling is breached."""
-        if self._queue.qsize() >= self.max_depth:
+        if self.queue.qsize() >= self.max_depth:
             self.total_rejected_capacity += 1
             raise RuntimeError(f"Queue capacity saturated ({self.max_depth} depth exceeded). Request shed.")
 
@@ -57,9 +69,9 @@ class BoundedPriorityQueueManager:
             future=future,
         )
 
-        await self._queue.put(queued_item)
+        await self.queue.put(queued_item)
         self.total_enqueued += 1
-        q_len = self._queue.qsize()
+        q_len = self.queue.qsize()
         if q_len > self.peak_queue_length:
             self.peak_queue_length = q_len
 
@@ -67,9 +79,9 @@ class BoundedPriorityQueueManager:
 
     async def dequeue_next(self) -> Optional[QueuedItem]:
         """Dequeue highest priority request. Enforces client deadline."""
-        while not self._queue.empty():
-            item = await self._queue.get()
-            self._queue.task_done()
+        while not self.queue.empty():
+            item = await self.queue.get()
+            self.queue.task_done()
 
             now = time.time()
             if now > item.deadline:
