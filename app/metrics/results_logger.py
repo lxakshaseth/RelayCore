@@ -99,9 +99,9 @@ class ResultsCsvLogger:
 _default_logger: Optional[ResultsCsvLogger] = None
 
 
-def get_results_logger() -> ResultsCsvLogger:
-    """Singleton getter for ResultsCsvLogger."""
+def get_results_logger(output_file: Optional[str] = None) -> ResultsCsvLogger:
+    """Singleton getter for ResultsCsvLogger with optional custom filepath."""
     global _default_logger
-    if _default_logger is None:
-        _default_logger = ResultsCsvLogger()
+    if _default_logger is None or (output_file and _default_logger.output_file != output_file):
+        _default_logger = ResultsCsvLogger(output_file or "results/results.csv")
     return _default_logger

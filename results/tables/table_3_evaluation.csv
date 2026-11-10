@@ -1,0 +1,4 @@
+setting,description,questions_asked,correct_and_cited_pct,wrong_pct,correctly_refused_pct,incorrectly_refused_pct,citation_correct_pct,tokens_per_answer,cost_per_1000_answers,first_token_p50_ms,first_token_p95_ms,total_time_p50_ms,total_time_p95_ms
+setting_a,"Setting A: Small chunks (150w), low top-k (k=2), no re-ranking",18,16.7,0.0,22.2,61.1,38.9,277.8,$0.0139,664.0,1043.5,2.5,905.0
+setting_b,"Setting B: Medium chunks (350w), moderate top-k (k=4), no re-ranking",18,33.3,0.0,22.2,44.4,55.6,811.1,$0.0406,780.5,11244.5,2.0,11464.6
+setting_c,"Setting C: Larger chunks (800w), moderate top-k (k=3), with re-ranking",18,33.3,11.1,22.2,33.3,55.6,539.4,$0.0270,6039.0,10675.8,3.5,15005.9

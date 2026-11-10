@@ -17,6 +17,35 @@ logger = logging.getLogger(__name__)
 
 
 RETRIEVAL_PRESETS: Dict[str, RetrievalSetting] = {
+    # Assignment Presets:
+    # A. Small chunks, low top-k, no re-ranking
+    "setting_a": RetrievalSetting(
+        name="setting_a",
+        chunk_size_words=150,
+        overlap_words=30,
+        top_k=2,
+        rerank=False,
+        min_score_threshold=3.0,
+    ),
+    # B. Medium chunks, moderate top-k, no re-ranking
+    "setting_b": RetrievalSetting(
+        name="setting_b",
+        chunk_size_words=350,
+        overlap_words=50,
+        top_k=4,
+        rerank=False,
+        min_score_threshold=3.5,
+    ),
+    # C. Larger chunks, moderate top-k, with re-ranking
+    "setting_c": RetrievalSetting(
+        name="setting_c",
+        chunk_size_words=800,
+        overlap_words=100,
+        top_k=3,
+        rerank=True,
+        min_score_threshold=4.0,
+    ),
+    # Named Aliases
     "small_k6": RetrievalSetting(
         name="small_k6",
         chunk_size_words=150,

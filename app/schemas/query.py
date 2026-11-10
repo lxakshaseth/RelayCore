@@ -23,8 +23,8 @@ class ExecutionMetrics(BaseModel):
     tokens_in: int = Field(default=0, description="Prompt tokens consumed")
     tokens_out: int = Field(default=0, description="Completion tokens generated")
     retries: int = Field(default=0, description="Number of retries triggered")
-    source: str = Field(description="'real' or 'stand-in'")
-    retrieval_setting: str = Field(description="Retrieval configuration tag")
+    source: str = Field(default="stand-in", description="'real' or 'stand-in'")
+    retrieval_setting: str = Field(default="medium_k3", description="Retrieval configuration tag")
     answer_grade: Optional[str] = Field(
         default=None,
         description="'correct', 'wrong', 'refused_correctly', 'refused_wrongly'",

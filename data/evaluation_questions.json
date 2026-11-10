@@ -1,0 +1,186 @@
+[
+  {
+    "id": "eval_01",
+    "category": "direct_answer",
+    "question": "What is the dimension of the embedding layers and sub-layers dmodel in the base Transformer model?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "In the base Transformer model, the dimensionality of input embeddings and all sub-layer outputs is dmodel = 512.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.1 Model Architecture', Page 3]",
+    "expected_answer_keywords": ["512", "dmodel"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_02",
+    "category": "direct_answer",
+    "question": "At what frame rate does the Mimi neural audio codec operate in Moshi, and what is the corresponding frame size in milliseconds?",
+    "target_papers": ["2410.00037v1"],
+    "expected_answer": "The Mimi neural audio codec operates at a frame rate of 12.5 Hz, which corresponds to an 80 ms audio frame size.",
+    "canonical_citations": "[Moshi: a speech-text foundation model for real-time dialogue (2410.00037v1), Section: '2.1 Mimi', Page 3 & Table 1]",
+    "expected_answer_keywords": ["12.5", "80", "mimi"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_03",
+    "category": "direct_answer",
+    "question": "What baseline fixed-size chunking architecture does Dynamic Chunking contrast against in hierarchical sequence modeling?",
+    "target_papers": ["2507.07955v2"],
+    "expected_answer": "Dynamic Chunking explicitly contrasts against MegaByte, which uses fixed-size pooling and pre-determined byte blocks rather than learning data-dependent dynamic chunks.",
+    "canonical_citations": "[Dynamic Chunking for End-to-End Hierarchical Sequence Modeling (2507.07955v2), Section: '1 Introduction' & Section: '2 Related Work', Pages 1-2]",
+    "expected_answer_keywords": ["megabyte", "fixed", "pooling"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_04",
+    "category": "multiple_passages",
+    "question": "Compare how positional information is encoded in the Transformer versus how temporal sequence order is maintained across the dual Depth and Temporal Transformers in Moshi.",
+    "target_papers": ["1706.03762v7", "2410.00037v1"],
+    "expected_answer": "The Transformer uses fixed sinusoidal positional encodings added directly to the input embeddings to inject token sequence order. In contrast, Moshi decomposes time and stream modeling into a dual architecture: a Temporal Transformer running across time steps at 12.5 Hz to model conversational history, and an autoregressive Depth Transformer modeling dependencies across the acoustic RVQ codebook indices within each time step.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.5 Positional Encoding', Page 6] and [Moshi (2410.00037v1), Section: '2.2 Moshi', Page 4]",
+    "expected_answer_keywords": ["sinusoidal", "temporal transformer", "depth transformer", "codebook"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_05",
+    "category": "multiple_passages",
+    "question": "How do the key, value, and query projections differ between the encoder self-attention, decoder masked self-attention, and decoder-encoder cross-attention layers in the Transformer?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "In encoder self-attention, queries, keys, and values all come from the previous encoder layer. In decoder masked self-attention, queries, keys, and values come from the previous decoder layer with future tokens masked out. In decoder-encoder cross-attention, queries come from the previous decoder layer, while keys and values come from the final output of the encoder stack.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.2.3 Applications of Attention in our Model', Pages 4-5]",
+    "expected_answer_keywords": ["encoder", "decoder", "queries", "keys", "values", "masked"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_06",
+    "category": "multiple_passages",
+    "question": "How does Moshi synchronize parallel audio streams with text tokens using its Inner Monologue mechanism?",
+    "target_papers": ["2410.00037v1"],
+    "expected_answer": "Moshi aligns speech audio and text into parallel multi-stream sequences. Through the Inner Monologue mechanism, text tokens representing the assistant's speech are generated alongside acoustic tokens, allowing the Depth Transformer to condition fine-grained acoustic codebooks on high-level semantic text predictions.",
+    "canonical_citations": "[Moshi: a speech-text foundation model for real-time dialogue (2410.00037v1), Section: '2.2 Moshi' & Section: '2.3 Inner Monologue', Pages 4-6]",
+    "expected_answer_keywords": ["inner monologue", "parallel", "streams", "acoustic", "text"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_07",
+    "category": "technical_details",
+    "question": "What are the exact optimizer settings (beta1, beta2, epsilon) and learning rate warmup formula parameters used for the base Transformer?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "The base Transformer is trained with Adam using beta1 = 0.9, beta2 = 0.98, and epsilon = 10^-9. The learning rate warms up linearly for 4000 steps according to lrate = dmodel^-0.5 * min(step_num^-0.5, step_num * warmup_steps^-1.5).",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '5.3 Optimizer', Page 7]",
+    "expected_answer_keywords": ["0.9", "0.98", "4000", "warmup", "adam"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_08",
+    "category": "technical_details",
+    "question": "What is the sampling rate, number of RVQ codebooks, and acoustic bitrate of the Mimi audio codec in Moshi?",
+    "target_papers": ["2410.00037v1"],
+    "expected_answer": "Mimi operates at a 24 kHz audio sampling rate, using 8 Residual Vector Quantization (RVQ) codebooks to produce an acoustic bitrate of 1.1 kbps (scalable to 32 codebooks for higher bitrates).",
+    "canonical_citations": "[Moshi: a speech-text foundation model for real-time dialogue (2410.00037v1), Section: '2.1 Mimi', Pages 3-4]",
+    "expected_answer_keywords": ["24 khz", "8", "rvq", "1.1 kbps"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_09",
+    "category": "technical_details",
+    "question": "What is the scaling factor applied to dot products in Scaled Dot-Product Attention, and why is it necessary according to the authors?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "The scaling factor is 1/sqrt(dk) (1/sqrt(64) = 0.125 in the base model). The authors explain that for large values of dk, dot products grow large in magnitude, pushing the softmax function into regions with extremely small gradients, which impedes learning.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.2.1 Scaled Dot-Product Attention', Pages 3-4]",
+    "expected_answer_keywords": ["sqrt(dk)", "gradients", "softmax", "large"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_10",
+    "category": "technical_details",
+    "question": "What is the theoretical minimum latency breakdown of Moshi in milliseconds, and what is its observed empirical conversational latency?",
+    "target_papers": ["2410.00037v1"],
+    "expected_answer": "The theoretical minimum latency is 160 ms (80 ms codec frame size + 80 ms acoustic lookahead window). In live conversational deployments, Moshi achieves an observed empirical end-to-end latency of approximately 200 ms.",
+    "canonical_citations": "[Moshi: a speech-text foundation model for real-time dialogue (2410.00037v1), Section: '2.1 Mimi' & Section: '4 Experimental Results', Pages 3, 9]",
+    "expected_answer_keywords": ["160", "80", "lookahead", "200"],
+    "is_answerable": true
+  },
+  {
+    "id": "eval_11",
+    "category": "unanswerable_out_of_corpus",
+    "question": "What was the total dollar electricity cost incurred by Kyutai to train Moshi on NVIDIA H100 clusters?",
+    "target_papers": ["2410.00037v1"],
+    "expected_answer": "The paper specifies the hardware used (NVIDIA H100 GPUs) and duration of training, but does not state the financial dollar electricity cost or utility expenditure.",
+    "canonical_citations": "Unanswerable from corpus; requires deterministic refusal.",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "eval_12",
+    "category": "unanswerable_out_of_corpus",
+    "question": "How does the Transformer model perform on the LibriSpeech 960-hour speech recognition benchmark compared to CTC models?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "Attention Is All You Need evaluates exclusively on English-to-German and English-to-French machine translation (WMT 2014) and English constituency parsing; it does not evaluate speech recognition on LibriSpeech.",
+    "canonical_citations": "Unanswerable from corpus; requires deterministic refusal.",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "eval_13",
+    "category": "unanswerable_out_of_corpus",
+    "question": "What is the recommended oven baking temperature and ingredient ratio for chewy chocolate chip cookies?",
+    "target_papers": [],
+    "expected_answer": "Out of corpus question. Requires immediate deterministic refusal.",
+    "canonical_citations": "Unanswerable from corpus; requires deterministic refusal.",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "eval_14",
+    "category": "unanswerable_out_of_corpus",
+    "question": "What is the recommended tire pressure in PSI and engine oil viscosity for a 2021 Honda Civic sedan?",
+    "target_papers": [],
+    "expected_answer": "Out of corpus question. Requires immediate deterministic refusal.",
+    "canonical_citations": "Unanswerable from corpus; requires deterministic refusal.",
+    "expected_answer_keywords": [],
+    "is_answerable": false
+  },
+  {
+    "id": "eval_15",
+    "category": "retrieval_failure_trap",
+    "question": "How does the multi-head attention mechanism chunk sequences into hierarchical discrete representations in Attention Is All You Need?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "Attention Is All You Need does not perform sequence chunking. Multi-head attention performs pairwise all-to-all attention across sequence tokens. Hierarchical sequence chunking is introduced in Dynamic Chunking (H-Net), not the Transformer.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.2 Multi-Head Attention', Page 4] and [Dynamic Chunking (2507.07955v2), Section: '1 Introduction', Page 1]",
+    "expected_answer_keywords": ["not chunk", "pairwise", "dynamic chunking"],
+    "is_answerable": true,
+    "trap_mechanism": "High lexical overlap on 'multi-head attention' pulls Transformer chunks, but asks about hierarchical chunking from Dynamic Chunking. Tests cross-paper interference."
+  },
+  {
+    "id": "eval_16",
+    "category": "retrieval_failure_trap",
+    "question": "What is the acoustic latency between the speaker and listener audio streams in the Transformer base model?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "The Transformer base model in Attention Is All You Need is a text-based machine translation model without audio streams, speaker/listener channels, or acoustic latency (which are concepts from Moshi).",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '1 Introduction' & Section: '3.1 Model Architecture', Pages 1-3]",
+    "expected_answer_keywords": ["text", "machine translation", "no acoustic", "moshi"],
+    "is_answerable": true,
+    "trap_mechanism": "High lexical match on 'Transformer base model', but acoustic streaming concepts belong to Moshi. Tests whether retriever or model hallucinates."
+  },
+  {
+    "id": "eval_17",
+    "category": "retrieval_failure_trap",
+    "question": "How many layers are in the feed-forward network?",
+    "target_papers": ["1706.03762v7"],
+    "expected_answer": "In Attention Is All You Need, the position-wise feed-forward network consists of two linear transformations with a ReLU activation between them: FFN(x) = max(0, xW1 + b1)W2 + b2.",
+    "canonical_citations": "[Attention Is All You Need (1706.03762v7), Section: '3.3 Position-wise Feed-Forward Networks', Page 5]",
+    "expected_answer_keywords": ["two", "linear", "relu", "inner layer"],
+    "is_answerable": true,
+    "trap_mechanism": "Extremely underspecified query. Feed-forward networks appear in Transformer, Moshi, and H-Net. Tests retrieval specificity and disambiguation."
+  },
+  {
+    "id": "eval_18",
+    "category": "retrieval_failure_trap",
+    "question": "How does the U-Net downsampling layer in Dynamic Chunking compute multi-head cross-attention over speech audio tokens?",
+    "target_papers": ["2507.07955v2"],
+    "expected_answer": "Dynamic Chunking's H-Net does not compute cross-attention over speech audio tokens. H-Net evaluates on byte-level and character text sequence modeling; speech audio tokenization is part of Moshi.",
+    "canonical_citations": "[Dynamic Chunking for End-to-End Hierarchical Sequence Modeling (2507.07955v2), Section: '2 H-Net Architecture', Pages 2-4]",
+    "expected_answer_keywords": ["does not compute", "byte", "not speech", "downsampling"],
+    "is_answerable": true,
+    "trap_mechanism": "Blends terminology across all three papers (U-Net downsampling from Dynamic Chunking, cross-attention from Transformer, audio tokens from Moshi). Tests composite hallucination rejection."
+  }
+]

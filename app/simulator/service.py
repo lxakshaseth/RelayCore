@@ -166,6 +166,41 @@ class StandinModelService(AbstractModelClient):
             source="stand-in",
         )
 
+    def _synthesize_simulated_content(self, request: ModelRequest) -> str:
+        """Generate simulated answer text grounded in prompt context passages when provided."""
+        user_content = ""
+        for m in reversed(request.messages):
+            if m.role == "user":
+                user_content = m.content
+                break
+
+        import re
+        # Look for structured passage citations in prompt like [Attention Is All You Need (1706.03762v7), Section: '...']
+        citation_matches = re.findall(
+            r"\[([^\]]+?\(\d{4}\.\d{4,5}v\d+\)[^\]]*?)\]", user_content
+        )
+
+        if citation_matches:
+            primary_cit = citation_matches[0]
+            # Extract factual content lines from passages
+            content_lines = [
+                line.strip()
+                for line in user_content.splitlines()
+                if line.strip()
+                and not line.startswith("[")
+                and not line.startswith("Context Passages")
+                and not line.startswith("Question:")
+                and len(line.strip()) > 30
+            ]
+            snippet = (
+                content_lines[0][:160]
+                if content_lines
+                else "the model uses self-attention mechanisms and multi-scale hierarchical sequences"
+            )
+            return f"According to [{primary_cit}], {snippet}."
+
+        return self.rng.choice(SYNTHETIC_RESPONSES)
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         """Execute a simulated non-streaming request."""
         target_model = request.model or self.config.model_name
@@ -231,7 +266,7 @@ class StandinModelService(AbstractModelClient):
 
         try:
             # Generate simulated response content
-            candidate_text = self.rng.choice(SYNTHETIC_RESPONSES)
+            candidate_text = self._synthesize_simulated_content(request)
             completion_tokens = max(5, len(candidate_text) // 4)
 
             # Compute calibrated latencies with concurrency load penalty
@@ -326,7 +361,7 @@ class StandinModelService(AbstractModelClient):
             self._daily_requests_count += 1
 
         try:
-            candidate_text = self.rng.choice(SYNTHETIC_RESPONSES)
+            candidate_text = self._synthesize_simulated_content(request)
             words = candidate_text.split()
             completion_tokens = max(len(words), len(candidate_text) // 4)
 
