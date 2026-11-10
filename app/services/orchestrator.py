@@ -6,11 +6,12 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import Settings, get_settings
 from app.core.queue_manager import BoundedPriorityQueueManager
-from app.core.rate_limiter import ClientRateLimiter
+from app.core.rate_limiter import RelayRateLimiter
+from app.core.retry import RetryPolicy
 from app.metrics.results_logger import RequestMetricRecord, get_results_logger
 from app.models.base import AbstractModelClient
 from app.models.groq_client import GroqAsyncClient
@@ -42,16 +43,18 @@ class OrchestrationPipeline:
         settings: Optional[Settings] = None,
         retrieval_service: Optional[RetrievalService] = None,
         model_client: Optional[AbstractModelClient] = None,
-        rate_limiter: Optional[ClientRateLimiter] = None,
+        rate_limiter: Optional[Any] = None,
         queue_manager: Optional[BoundedPriorityQueueManager] = None,
+        retry_policy: Optional[RetryPolicy] = None,
     ):
         self.settings = settings or get_settings()
         self.retrieval_service = retrieval_service or get_retrieval_service(data_dir=self.settings.data_dir)
-        self.rate_limiter = rate_limiter or ClientRateLimiter(settings=self.settings)
+        self.rate_limiter = rate_limiter or RelayRateLimiter(settings=self.settings)
         self.queue_manager = queue_manager or BoundedPriorityQueueManager(
             max_depth=self.settings.max_queue_depth,
             max_concurrency=self.settings.worker_concurrency,
         )
+        self.retry_policy = retry_policy or RetryPolicy(max_retries=self.settings.max_retries)
         self.results_logger = get_results_logger()
 
         # Model backend: defaults to GroqAsyncClient or StandinModelService based on SIMULATOR_ENABLED
@@ -293,10 +296,16 @@ class OrchestrationPipeline:
 
             # Acquire rate limit slot from client token bucket
             remaining_time = max(0.5, deadline_time - time.time())
-            acquired, limit_reason = await self.rate_limiter.acquire_or_wait(
-                estimated_tokens=estimated_prompt_tokens,
-                max_wait_seconds=min(remaining_time, 10.0),
-            )
+            if hasattr(self.rate_limiter, "acquire_slot"):
+                acquired, limit_reason = await self.rate_limiter.acquire_slot(
+                    estimated_tokens=estimated_prompt_tokens,
+                    max_wait_seconds=min(remaining_time, 10.0),
+                )
+            else:
+                acquired, limit_reason = await self.rate_limiter.acquire_or_wait(
+                    estimated_tokens=estimated_prompt_tokens,
+                    max_wait_seconds=min(remaining_time, 10.0),
+                )
             if not acquired:
                 status = "rate_limited"
                 answer_grade = "refused_wrongly"
@@ -342,14 +351,18 @@ class OrchestrationPipeline:
                     ),
                 ]
 
-                # Invoke Model Backend
+                # Invoke Model Backend with Concurrency Semaphore
                 model_req = ModelRequest(
                     messages=prompt_messages,
                     timeout_seconds=min(15.0, max(0.01, remaining_deadline)),
                     temperature=0.1,
                     max_tokens=256,
                 )
-                model_response = await self.model_client.complete(model_req)
+                if hasattr(self.rate_limiter, "concurrency_semaphore"):
+                    async with self.rate_limiter.concurrency_semaphore:
+                        model_response = await self.model_client.complete(model_req)
+                else:
+                    model_response = await self.model_client.complete(model_req)
 
                 if attempt == 0:
                     first_token_ms = model_response.first_token_ms
@@ -378,24 +391,35 @@ class OrchestrationPipeline:
                         # Hallucination or missing citation detected
                         logger.warning("Attempt %d: Output lacked valid citations. Retrying with strict grounding hint...", attempt + 1)
 
-                elif model_response.status == "rate_limited":
-                    # Avoid retrying if TPM overload makes things worse -> shed context
-                    logger.warning("Upstream rate limited (429). Halving context passages for retry attempt...")
-                    passages_context = self.format_passages_context(retrieval_res.passages, max_passages=2)
-
                 # STAGE 10: Retry Backoff Decision
-                if attempt < max_attempts - 1:
+                daily_exhausted = (
+                    self.rate_limiter.is_daily_budget_exhausted()
+                    if hasattr(self.rate_limiter, "is_daily_budget_exhausted")
+                    else False
+                )
+                if self.retry_policy.is_retriable(
+                    response=model_response,
+                    attempt=attempt,
+                    deadline_time=deadline_time,
+                    is_daily_exhausted=daily_exhausted,
+                ):
                     retries += 1
-                    # Exponential backoff with full jitter
-                    jitter = random.uniform(0.5, 1.0)
-                    backoff = min(2.0, (0.4 * (2**attempt))) * jitter
-                    if time.time() + backoff > deadline_time:
-                        status = "timeout"
-                        break
+                    # Avoid worsening overload on TPM: shed context
+                    if self.retry_policy.should_shed_context_on_retry(model_response):
+                        logger.warning("Upstream rate limited on TPM. Shedding context passages for retry...")
+                        passages_context = self.format_passages_context(retrieval_res.passages, max_passages=2)
+
+                    retry_after = (
+                        model_response.rate_limit_info.retry_after
+                        if model_response and model_response.rate_limit_info
+                        else None
+                    )
+                    backoff = self.retry_policy.compute_backoff(attempt=attempt, retry_after=retry_after)
                     await asyncio.sleep(backoff)
                 else:
                     status = model_response.status if model_response else "error"
                     final_answer = model_response.content if model_response else "Failed after maximum retries."
+                    break
 
             if status == "timeout" and not final_answer:
                 final_answer = "Request timed out: client deadline was exceeded."
