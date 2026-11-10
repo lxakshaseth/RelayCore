@@ -23,7 +23,8 @@ except ImportError:
     class _BaseSettingsConfig(BaseModel):  # type: ignore[no-redef]
         def __init__(self, **kwargs):
             env_vals = {}
-            for field_name, field_info in self.model_fields.items():
+            fields = getattr(self.__class__, "model_fields", {})
+            for field_name, field_info in fields.items():
                 alias = field_info.alias or field_name.upper()
                 if alias in os.environ:
                     val = os.environ[alias]
