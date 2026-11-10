@@ -127,6 +127,24 @@ class RetrievalService:
 
         self._initialized = True
 
+    @staticmethod
+    def _chunk_matches_target(chunk: DocumentChunk, target: str) -> bool:
+        """Check if a chunk matches a target paper identifier, with or without version."""
+        clean_target = target.strip().lower()
+        if clean_target.startswith("arxiv:"):
+            clean_target = clean_target.split("arxiv:", 1)[1].strip()
+
+        # Extract base arXiv IDs without version (e.g. '1706.03762' from '1706.03762v7')
+        base_chunk_id = chunk.paper_id.lower().split("v")[0]
+        base_target = clean_target.split("v")[0]
+
+        return (
+            clean_target in chunk.paper_id.lower()
+            or base_target == base_chunk_id
+            or clean_target in chunk.paper_title.lower()
+            or clean_target in chunk.source_url.lower()
+        )
+
     def format_citation(self, chunk: DocumentChunk) -> str:
         """Construct exact human-readable and structured citation string."""
         return (
@@ -151,6 +169,8 @@ class RetrievalService:
             self.initialize_indexes([setting_name])
 
         clean_query = query.strip() if query else ""
+        num_indexed_docs = len(CANONICAL_PAPERS)
+
         if not clean_query:
             return RetrievalResponse(
                 query=query,
@@ -159,6 +179,18 @@ class RetrievalService:
                 refusal_reason="Empty query provided; cannot retrieve passages.",
                 retrieval_setting=setting_name,
                 total_candidates_searched=0,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": 0,
+                    "chunks_after_paper_filtering": 0,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": [],
+                    "top_5_passage_snippets": [],
+                    "matched_paper_ids": [],
+                    "keyword_coverage": 0.0,
+                    "confidence_threshold": 0.0,
+                    "exact_refusal_reason": "Empty query provided; cannot retrieve passages.",
+                },
             )
 
         setting = RETRIEVAL_PRESETS.get(setting_name, RETRIEVAL_PRESETS["medium_k3"])
@@ -176,78 +208,210 @@ class RetrievalService:
             bm25_index = self._bm25_by_setting[setting_name]
             chunks = self._chunks_by_setting[setting_name]
 
-        query_tokens = tokenize(clean_query)
-        if not query_tokens:
+        num_chunks_before = len(chunks)
+
+        # 1. Target Paper Pre-Filtering (search space partitioning)
+        eligible_indices: Optional[Set[int]] = None
+        if target_papers:
+            eligible_indices = {
+                idx
+                for idx, c in enumerate(chunks)
+                if any(self._chunk_matches_target(c, t) for t in target_papers)
+            }
+            num_chunks_after_filter = len(eligible_indices)
+        else:
+            num_chunks_after_filter = num_chunks_before
+
+        # If user targeted papers that do not exist in the collection
+        if target_papers and num_chunks_after_filter == 0:
+            refusal_reason = (
+                f"Target paper(s) {target_papers} were not found in the indexed collection of {num_indexed_docs} documents."
+            )
+            self._log_diagnostics(
+                query=clean_query,
+                num_indexed_docs=num_indexed_docs,
+                num_chunks_before=num_chunks_before,
+                num_chunks_after_filter=0,
+                num_chunks_after_retrieval=0,
+                top5_scores=[],
+                top5_snippets=[],
+                matched_paper_ids=[],
+                coverage_ratio=0.0,
+                threshold=threshold,
+                refusal_reason=refusal_reason,
+            )
             return RetrievalResponse(
                 query=clean_query,
                 passages=[],
                 has_evidence=False,
-                refusal_reason="Query contains no meaningful keywords after stopword filtering.",
+                refusal_reason=refusal_reason,
                 retrieval_setting=setting_name,
-                total_candidates_searched=len(chunks),
+                total_candidates_searched=0,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": num_chunks_before,
+                    "chunks_after_paper_filtering": 0,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": [],
+                    "top_5_passage_snippets": [],
+                    "matched_paper_ids": [],
+                    "keyword_coverage": 0.0,
+                    "confidence_threshold": threshold,
+                    "exact_refusal_reason": refusal_reason,
+                },
             )
 
-        # 1. Corpus Vocabulary Check: Detect keywords completely absent from library
+        query_tokens = tokenize(clean_query)
+        if not query_tokens:
+            refusal_reason = "Query contains no meaningful keywords after stopword filtering."
+            self._log_diagnostics(
+                query=clean_query,
+                num_indexed_docs=num_indexed_docs,
+                num_chunks_before=num_chunks_before,
+                num_chunks_after_filter=num_chunks_after_filter,
+                num_chunks_after_retrieval=0,
+                top5_scores=[],
+                top5_snippets=[],
+                matched_paper_ids=[],
+                coverage_ratio=0.0,
+                threshold=threshold,
+                refusal_reason=refusal_reason,
+            )
+            return RetrievalResponse(
+                query=clean_query,
+                passages=[],
+                has_evidence=False,
+                refusal_reason=refusal_reason,
+                retrieval_setting=setting_name,
+                total_candidates_searched=num_chunks_after_filter,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": num_chunks_before,
+                    "chunks_after_paper_filtering": num_chunks_after_filter,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": [],
+                    "top_5_passage_snippets": [],
+                    "matched_paper_ids": [],
+                    "keyword_coverage": 0.0,
+                    "confidence_threshold": threshold,
+                    "exact_refusal_reason": refusal_reason,
+                },
+            )
+
+        # 2. Corpus Vocabulary Check: Detect keywords completely absent from library
         unique_query_tokens = set(query_tokens)
         missing_from_corpus = [t for t in unique_query_tokens if t not in self._corpus_vocabulary]
-        
+
         # If more than half of the distinct query terms don't exist in the corpus at all
         if len(unique_query_tokens) >= 2 and (len(missing_from_corpus) / len(unique_query_tokens)) > 0.5:
             missing_terms_str = ", ".join(f"'{t}'" for t in missing_from_corpus)
+            refusal_reason = (
+                f"The research papers do not contain references to: {missing_terms_str}. "
+                "Cannot ground an answer from the library."
+            )
+            self._log_diagnostics(
+                query=clean_query,
+                num_indexed_docs=num_indexed_docs,
+                num_chunks_before=num_chunks_before,
+                num_chunks_after_filter=num_chunks_after_filter,
+                num_chunks_after_retrieval=0,
+                top5_scores=[],
+                top5_snippets=[],
+                matched_paper_ids=[],
+                coverage_ratio=0.0,
+                threshold=threshold,
+                refusal_reason=refusal_reason,
+            )
             return RetrievalResponse(
                 query=clean_query,
                 passages=[],
                 has_evidence=False,
-                refusal_reason=(
-                    f"The research papers do not contain references to: {missing_terms_str}. "
-                    "Cannot ground an answer from the library."
-                ),
+                refusal_reason=refusal_reason,
                 retrieval_setting=setting_name,
-                total_candidates_searched=len(chunks),
+                total_candidates_searched=num_chunks_after_filter,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": num_chunks_before,
+                    "chunks_after_paper_filtering": num_chunks_after_filter,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": [],
+                    "top_5_passage_snippets": [],
+                    "matched_paper_ids": [],
+                    "keyword_coverage": 0.0,
+                    "confidence_threshold": threshold,
+                    "exact_refusal_reason": refusal_reason,
+                },
             )
 
-        # 2. Extract top candidates using BM25
-        candidate_pool_size = effective_k * 3 if effective_rerank else effective_k
-        top_candidates = bm25_index.get_top_k(clean_query, k=candidate_pool_size)
+        # 3. Extract scored candidates using BM25 with pre-filtered indices
+        candidate_pool_size = (
+            min(num_chunks_after_filter, max(effective_k * 4, 15))
+            if effective_rerank
+            else effective_k
+        )
+        all_candidate_scores = bm25_index.get_scores_for_indices(
+            query_tokens, eligible_indices=eligible_indices
+        )
 
-        results: List[RetrievalResult] = []
-        for idx, score in top_candidates:
-            chunk = chunks[idx]
+        top5_scores = [round(s, 4) for _, s in all_candidate_scores[:5]]
+        top5_snippets = [
+            chunks[idx].content[:80].replace("\n", " ").strip() + "..."
+            for idx, _ in all_candidate_scores[:5]
+        ]
 
-            # Optional filter by paper_id or arxiv_id
-            if target_papers:
-                matches_target = any(
-                    target in chunk.paper_id or target in chunk.source_url
-                    for target in target_papers
-                )
-                if not matches_target:
-                    continue
-
-            results.append(
-                RetrievalResult(
-                    chunk=chunk,
-                    score=round(score, 4),
-                    citation=self.format_citation(chunk),
-                )
+        if not all_candidate_scores:
+            refusal_reason = f"The provided research papers do not contain passages matching '{clean_query}'."
+            self._log_diagnostics(
+                query=clean_query,
+                num_indexed_docs=num_indexed_docs,
+                num_chunks_before=num_chunks_before,
+                num_chunks_after_filter=num_chunks_after_filter,
+                num_chunks_after_retrieval=0,
+                top5_scores=[],
+                top5_snippets=[],
+                matched_paper_ids=[],
+                coverage_ratio=0.0,
+                threshold=threshold,
+                refusal_reason=refusal_reason,
+            )
+            return RetrievalResponse(
+                query=clean_query,
+                passages=[],
+                has_evidence=False,
+                refusal_reason=refusal_reason,
+                retrieval_setting=setting_name,
+                total_candidates_searched=num_chunks_after_filter,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": num_chunks_before,
+                    "chunks_after_paper_filtering": num_chunks_after_filter,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": [],
+                    "top_5_passage_snippets": [],
+                    "matched_paper_ids": [],
+                    "keyword_coverage": 0.0,
+                    "confidence_threshold": threshold,
+                    "exact_refusal_reason": refusal_reason,
+                },
             )
 
-        # 3. Apply secondary re-ranking if configured
+        top_candidates = all_candidate_scores[:candidate_pool_size]
+        results: List[RetrievalResult] = [
+            RetrievalResult(
+                chunk=chunks[idx],
+                score=round(score, 4),
+                citation=self.format_citation(chunks[idx]),
+            )
+            for idx, score in top_candidates
+        ]
+
+        # 4. Apply secondary re-ranking if configured
         if effective_rerank and results:
             results = self.reranker.rerank(clean_query, results)
 
         final_passages = results[:effective_k]
 
-        # 4. Evidence Validation & Refusal Guardrails
-        if not final_passages:
-            return RetrievalResponse(
-                query=clean_query,
-                passages=[],
-                has_evidence=False,
-                refusal_reason=f"The provided research papers do not contain passages matching '{clean_query}'.",
-                retrieval_setting=setting_name,
-                total_candidates_searched=len(chunks),
-            )
-
+        # 5. Evidence Validation & Refusal Guardrails
         best_result = final_passages[0]
         best_score = best_result.rerank_score or best_result.score
 
@@ -255,19 +419,63 @@ class RetrievalService:
         best_chunk_tokens = set(tokenize(f"{best_result.chunk.section} {best_result.chunk.content}"))
         matched_tokens = unique_query_tokens.intersection(best_chunk_tokens)
         coverage_ratio = len(matched_tokens) / len(unique_query_tokens) if unique_query_tokens else 0.0
+        matched_paper_ids = sorted(list({p.chunk.paper_id for p in final_passages}))
 
         if best_score < threshold or (len(unique_query_tokens) >= 2 and coverage_ratio < min_coverage_ratio):
+            refusal_reason = (
+                f"Insufficient grounding evidence in the library. Retrieval score ({best_score:.2f}) "
+                f"or keyword coverage ({coverage_ratio:.1%}) did not meet confidence threshold "
+                f"(threshold: {threshold:.2f}, min_coverage: {min_coverage_ratio:.1%})."
+            )
+            self._log_diagnostics(
+                query=clean_query,
+                num_indexed_docs=num_indexed_docs,
+                num_chunks_before=num_chunks_before,
+                num_chunks_after_filter=num_chunks_after_filter,
+                num_chunks_after_retrieval=0,
+                top5_scores=top5_scores,
+                top5_snippets=top5_snippets,
+                matched_paper_ids=matched_paper_ids,
+                coverage_ratio=coverage_ratio,
+                threshold=threshold,
+                refusal_reason=refusal_reason,
+            )
             return RetrievalResponse(
                 query=clean_query,
                 passages=[],
                 has_evidence=False,
-                refusal_reason=(
-                    f"Insufficient grounding evidence in the library. Retrieval score ({best_score:.2f}) "
-                    f"or keyword coverage ({coverage_ratio:.1%}) did not meet confidence threshold."
-                ),
+                refusal_reason=refusal_reason,
                 retrieval_setting=setting_name,
-                total_candidates_searched=len(chunks),
+                total_candidates_searched=num_chunks_after_filter,
+                diagnostics={
+                    "indexed_documents": num_indexed_docs,
+                    "chunks_before_filtering": num_chunks_before,
+                    "chunks_after_paper_filtering": num_chunks_after_filter,
+                    "chunks_after_retrieval": 0,
+                    "top_5_retrieval_scores": top5_scores,
+                    "top_5_passage_snippets": top5_snippets,
+                    "matched_paper_ids": matched_paper_ids,
+                    "keyword_coverage": round(coverage_ratio, 4),
+                    "confidence_threshold": threshold,
+                    "exact_refusal_reason": refusal_reason,
+                },
             )
+
+        # Successful retrieval with verified grounding
+        num_chunks_after_retrieval = len(final_passages)
+        self._log_diagnostics(
+            query=clean_query,
+            num_indexed_docs=num_indexed_docs,
+            num_chunks_before=num_chunks_before,
+            num_chunks_after_filter=num_chunks_after_filter,
+            num_chunks_after_retrieval=num_chunks_after_retrieval,
+            top5_scores=top5_scores,
+            top5_snippets=top5_snippets,
+            matched_paper_ids=matched_paper_ids,
+            coverage_ratio=coverage_ratio,
+            threshold=threshold,
+            refusal_reason=None,
+        )
 
         return RetrievalResponse(
             query=clean_query,
@@ -275,7 +483,65 @@ class RetrievalService:
             has_evidence=True,
             refusal_reason=None,
             retrieval_setting=setting_name,
-            total_candidates_searched=len(chunks),
+            total_candidates_searched=num_chunks_after_filter,
+            diagnostics={
+                "indexed_documents": num_indexed_docs,
+                "chunks_before_filtering": num_chunks_before,
+                "chunks_after_paper_filtering": num_chunks_after_filter,
+                "chunks_after_retrieval": num_chunks_after_retrieval,
+                "top_5_retrieval_scores": top5_scores,
+                "top_5_passage_snippets": top5_snippets,
+                "matched_paper_ids": matched_paper_ids,
+                "keyword_coverage": round(coverage_ratio, 4),
+                "confidence_threshold": threshold,
+                "exact_refusal_reason": None,
+            },
+        )
+
+    def _log_diagnostics(
+        self,
+        query: str,
+        num_indexed_docs: int,
+        num_chunks_before: int,
+        num_chunks_after_filter: int,
+        num_chunks_after_retrieval: int,
+        top5_scores: List[float],
+        top5_snippets: List[str],
+        matched_paper_ids: List[str],
+        coverage_ratio: float,
+        threshold: float,
+        refusal_reason: Optional[str],
+    ) -> None:
+        """Log structured diagnostics for every retrieval query."""
+        logger.info(
+            "\n"
+            "====================== RETRIEVAL DIAGNOSTICS ======================\n"
+            "  Query                       : '%s'\n"
+            "  Number of indexed documents : %d\n"
+            "  Chunks before filtering     : %d\n"
+            "  Chunks after paper filter   : %d\n"
+            "  Chunks after retrieval      : %d\n"
+            "  Top 5 retrieval scores      : %s\n"
+            "  Top 5 passage snippets      :\n"
+            "%s\n"
+            "  Matched paper IDs           : %s\n"
+            "  Keyword coverage            : %.1f%%\n"
+            "  Confidence threshold        : %.2f\n"
+            "  Exact refusal reason        : %s\n"
+            "===================================================================",
+            query,
+            num_indexed_docs,
+            num_chunks_before,
+            num_chunks_after_filter,
+            num_chunks_after_retrieval,
+            top5_scores,
+            "\n".join(f"    [{i+1}] {s}" for i, s in enumerate(top5_snippets))
+            if top5_snippets
+            else "    (None)",
+            matched_paper_ids if matched_paper_ids else "[]",
+            coverage_ratio * 100.0,
+            threshold,
+            refusal_reason or "None (Sufficient grounding evidence)",
         )
 
 

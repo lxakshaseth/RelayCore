@@ -83,7 +83,7 @@ class Settings(_BaseSettingsConfig):
     max_retries: int = Field(default=2, alias="MAX_RETRIES")
 
     # Retrieval and Storage
-    data_dir: str = Field(default="data", alias="DATA_DIR")
+    data_dir: str = Field(default="data/papers", alias="DATA_DIR")
     results_dir: str = Field(default="results", alias="RESULTS_DIR")
     default_chunk_size_words: int = Field(default=350, alias="DEFAULT_CHUNK_SIZE_WORDS")
     default_chunk_overlap_words: int = Field(default=50, alias="DEFAULT_CHUNK_OVERLAP_WORDS")

@@ -1,6 +1,6 @@
 """Data models for paper representations, chunking, and retrieval."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -45,6 +45,10 @@ class RetrievalResponse(BaseModel):
         description="Setting configuration identifier (e.g. small_k6, medium_k3, large_k2)",
     )
     total_candidates_searched: int = Field(default=0)
+    diagnostics: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured telemetry diagnostics for retrieval auditing",
+    )
 
 
 class RetrievalSetting(BaseModel):

@@ -78,10 +78,18 @@ class PaperParser:
             raise ValueError(f"Unknown paper_id: {paper_id}. Must be one of {list(CANONICAL_PAPERS.keys())}")
 
         entry = CANONICAL_PAPERS[paper_id]
-        pdf_path = os.path.join(self.data_dir, entry.pdf_filename)
+        candidate_paths = [
+            os.path.join(self.data_dir, entry.pdf_filename),
+            os.path.join(self.data_dir, "papers", entry.pdf_filename),
+            os.path.join("data", "papers", entry.pdf_filename),
+            os.path.join("data", entry.pdf_filename),
+        ]
+        pdf_path = next((p for p in candidate_paths if os.path.exists(p)), None)
 
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"PDF file for {paper_id} not found at {pdf_path}")
+        if not pdf_path:
+            raise FileNotFoundError(
+                f"PDF file for {paper_id} not found. Looked in: {candidate_paths}"
+            )
 
         doc = pymupdf.open(pdf_path)
         blocks: List[ParsedSectionBlock] = []

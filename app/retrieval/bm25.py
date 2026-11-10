@@ -80,17 +80,37 @@ class BM25Okapi:
 
         return score
 
-    def get_top_k(self, query: str, k: int = 3) -> List[Tuple[int, float]]:
-        """Retrieve the top-K document indices and scores for a given query."""
-        query_tokens = tokenize(query)
+    def get_scores_for_indices(
+        self,
+        query_tokens: List[str],
+        eligible_indices: Optional[Set[int]] = None,
+    ) -> List[Tuple[int, float]]:
+        """Calculate and return non-zero BM25 scores for eligible document indices, sorted descending."""
         if not query_tokens:
             return []
 
         scores: List[Tuple[int, float]] = []
-        for idx in range(self.corpus_size):
+        indices_to_search = (
+            eligible_indices if eligible_indices is not None else range(self.corpus_size)
+        )
+        for idx in indices_to_search:
             s = self.score(query_tokens, idx)
             if s > 0.0:
                 scores.append((idx, s))
 
         scores.sort(key=lambda x: x[1], reverse=True)
+        return scores
+
+    def get_top_k(
+        self,
+        query: str,
+        k: int = 3,
+        eligible_indices: Optional[Set[int]] = None,
+    ) -> List[Tuple[int, float]]:
+        """Retrieve the top-K document indices and scores for a given query among eligible indices."""
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return []
+
+        scores = self.get_scores_for_indices(query_tokens, eligible_indices=eligible_indices)
         return scores[:k]
