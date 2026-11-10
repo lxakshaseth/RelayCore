@@ -237,6 +237,26 @@ class StandinModelService(AbstractModelClient):
             # Compute calibrated latencies with concurrency load penalty
             effective_ttft, total_ms = self._calculate_latencies(completion_tokens)
 
+            # Check if simulated execution exceeds request timeout deadline
+            if (total_ms / 1000.0) > request.timeout_seconds:
+                await asyncio.sleep(request.timeout_seconds)
+                self.audit.record(
+                    model=target_model,
+                    status="timeout",
+                    total_ms=int(request.timeout_seconds * 1000),
+                )
+                return ModelResponse(
+                    content="",
+                    first_token_ms=None,
+                    total_ms=int(request.timeout_seconds * 1000),
+                    tokens_in=prompt_tokens,
+                    tokens_out=0,
+                    status="timeout",
+                    error_info=f"Request timed out after {request.timeout_seconds}s (Simulated latency {total_ms}ms exceeded deadline)",
+                    model=target_model,
+                    source="stand-in",
+                )
+
             # Simulate execution time
             await asyncio.sleep(total_ms / 1000.0)
 

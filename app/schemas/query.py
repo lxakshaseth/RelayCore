@@ -19,6 +19,7 @@ class ExecutionMetrics(BaseModel):
 
     first_token_ms: Optional[int] = Field(default=None, description="Time to first token in milliseconds")
     total_ms: int = Field(description="Total request turnaround time in milliseconds")
+    status: str = Field(default="ok", description="Execution status: 'ok', 'rate_limited', 'timeout', 'error'")
     tokens_in: int = Field(default=0, description="Prompt tokens consumed")
     tokens_out: int = Field(default=0, description="Completion tokens generated")
     retries: int = Field(default=0, description="Number of retries triggered")
